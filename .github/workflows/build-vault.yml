@@ -23,6 +23,8 @@ jobs:
             -v "$PWD":/work -w /work \
             arm64v8/python:${{ matrix.python }}-slim \
             bash -c "
+              apt-get update -qq &&
+              apt-get install -y -qq gcc build-essential &&
               pip install --quiet cython &&
               python enc10.py test_app.py --build-only --no-inject --opt=-O1 -o vault/${{ matrix.python }}.arm64
             "
