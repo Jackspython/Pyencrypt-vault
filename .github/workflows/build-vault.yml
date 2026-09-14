@@ -1,1 +1,132 @@
+name: Build Vault Binaries
 
+on:
+  workflow_dispatch:
+    inputs:
+      python_versions:
+        description: 'Python versions to build (comma-separated)'
+        required: false
+        default: '3.11,3.12,3.13,3.14'
+      architectures:
+        description: 'Architectures (arm64,arm32,win)'
+        required: false
+        default: 'arm64,arm32,win'
+
+jobs:
+  # ===== ARM64 + ARM32 on Linux (Docker multi-arch) =====
+  build-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+        arch: ['arm64', 'arm32']
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for ARM cross-build)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p vault
+          cp enc10.py test_app.py vault/ 2>/dev/null || true
+
+      - name: Build ${{ matrix.python }} / ${{ matrix.arch }}
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            PLATFORM="linux/arm64"
+            IMAGE="arm64v8/python:${{ matrix.python }}-slim"
+          else
+            PLATFORM="linux/arm/v7"
+            IMAGE="arm32v7/python:${{ matrix.python }}-slim"
+          fi
+          
+          docker run --rm --platform $PLATFORM \
+            -v "$PWD":/work -w /work $IMAGE \
+            bash -c "
+              pip install --quiet cython &&
+              python enc10.py test_app.py --build-only \
+                -o vault/${{ matrix.python }}.${{ matrix.arch }} \
+                --opt -O1
+            "
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.python }}-${{ matrix.arch }}
+          path: vault/${{ matrix.python }}.${{ matrix.arch }}
+          if-no-files-found: error
+
+  # ===== Windows on Windows runner (MSVC) =====
+  build-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install Cython
+        run: pip install cython
+
+      - name: Prepare workspace
+        run: |
+          mkdir vault
+          Copy-Item enc10.py vault/ -ErrorAction SilentlyContinue
+          Copy-Item test_app.py vault/ -ErrorAction SilentlyContinue
+        shell: pwsh
+
+      - name: Build Windows EXE
+        working-directory: vault
+        run: |
+          python enc10.py test_app.py --build-only -o ${{ matrix.python }}.win.exe --opt -O1
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.python }}-win
+          path: vault/${{ matrix.python }}.win.exe
+          if-no-files-found: error
+
+  # ===== Combine all artifacts into one vault.tar.gz =====
+  combine-vault:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-binaries
+
+      - name: Collect into vault/
+        run: |
+          mkdir -p vault
+          find all-binaries -type f -exec cp {} vault/ \;
+          ls -la vault/
+
+      - name: Create tarball
+        run: tar -czf vault.tar.gz vault/
+
+      - name: Upload combined vault
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-complete
+          path: vault.tar.gz
+          if-no-files-found: error
+
+      - name: Also upload each binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-binaries
+          path: vault/*
+          if-no-files-found: error
