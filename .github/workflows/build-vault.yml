@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-linux:
+  build-arm64:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -13,29 +13,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - name: Install Cython
-        run: pip install cython
-
-      - name: Build ${{ matrix.python }}
+      - name: Build ${{ matrix.python }} ARM64
         run: |
           mkdir -p vault
-          python enc10.py test_app.py --build-only --no-inject --opt=-O1 -o vault/${{ matrix.python }}.x86_64
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/work -w /work \
+            arm64v8/python:${{ matrix.python }}-slim \
+            bash -c "
+              pip install --quiet cython &&
+              python enc10.py test_app.py --build-only --no-inject --opt=-O1 -o vault/${{ matrix.python }}.arm64
+            "
           ls -la vault/
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: binary-${{ matrix.python }}-linux
-          path: vault/${{ matrix.python }}.x86_64
-          if-no-files-found: warn
+          name: binary-${{ matrix.python }}-arm64
+          path: vault/${{ matrix.python }}.arm64
+          if-no-files-found: error
 
   combine:
-    needs: [build-linux]
+    needs: [build-arm64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
