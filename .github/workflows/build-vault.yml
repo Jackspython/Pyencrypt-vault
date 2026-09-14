@@ -24,16 +24,15 @@ jobs:
       - name: Build ${{ matrix.python }}
         run: |
           mkdir -p vault
-          python enc10.py test_app.py --build-only -o vault/${{ matrix.python }}.x86_64 --opt -O1 --no-inject
+          python enc10.py test_app.py --build-only --no-inject --opt=-O1 -o vault/${{ matrix.python }}.x86_64
           ls -la vault/
 
       - name: Upload
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.python }}-linux
           path: vault/${{ matrix.python }}.x86_64
-          if-no-files-found: error
+          if-no-files-found: warn
 
   build-windows:
     runs-on: windows-latest
@@ -56,17 +55,16 @@ jobs:
       - name: Build ${{ matrix.python }}
         run: |
           mkdir vault -Force
-          python enc10.py test_app.py --build-only -o vault/${{ matrix.python }}.win.exe --opt -O1 --no-inject
+          python enc10.py test_app.py --build-only --no-inject --opt=-O1 -o vault/${{ matrix.python }}.win.exe
           dir vault
         shell: pwsh
 
       - name: Upload
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.python }}-win
           path: vault/${{ matrix.python }}.win.exe
-          if-no-files-found: error
+          if-no-files-found: warn
 
   combine:
     needs: [build-linux, build-windows]
@@ -90,3 +88,4 @@ jobs:
         with:
           name: vault-complete
           path: vault.tar.gz
+          if-no-files-found: error
