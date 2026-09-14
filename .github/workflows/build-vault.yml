@@ -4,9 +4,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-linux-arm64:
+  build-linux:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python: ['3.11', '3.12', '3.13']
     steps:
@@ -20,27 +21,24 @@ jobs:
       - name: Install Cython
         run: pip install cython
 
-      - name: Prepare workspace
+      - name: Build ${{ matrix.python }}
         run: |
           mkdir -p vault
-          cp test_app.py vault/ 2>/dev/null || echo "print('vault')" > vault/test_app.py
-
-      - name: Build ${{ matrix.python }} arm64
-        run: |
-          cd vault
-          python ../enc10.py test_app.py --build-only -o ${{ matrix.python }}.arm64 --opt -O1
-        continue-on-error: true
+          python enc10.py test_app.py --build-only -o vault/${{ matrix.python }}.x86_64 --opt -O1 --no-inject
+          ls -la vault/
 
       - name: Upload
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: bin-${{ matrix.python }}-arm64
-          path: vault/${{ matrix.python }}.arm64
-          if-no-files-found: warn
+          name: binary-${{ matrix.python }}-linux
+          path: vault/${{ matrix.python }}.x86_64
+          if-no-files-found: error
 
   build-windows:
     runs-on: windows-latest
     strategy:
+      fail-fast: false
       matrix:
         python: ['3.11', '3.12', '3.13']
     steps:
@@ -55,29 +53,23 @@ jobs:
         run: pip install cython
         shell: pwsh
 
-      - name: Prepare workspace
+      - name: Build ${{ matrix.python }}
         run: |
-          mkdir vault
-          if (Test-Path test_app.py) { Copy-Item test_app.py vault/ }
-          else { Set-Content vault/test_app.py "print('vault')" }
+          mkdir vault -Force
+          python enc10.py test_app.py --build-only -o vault/${{ matrix.python }}.win.exe --opt -O1 --no-inject
+          dir vault
         shell: pwsh
-
-      - name: Build ${{ matrix.python }} win
-        run: |
-          cd vault
-          python ../enc10.py test_app.py --build-only -o ${{ matrix.python }}.win.exe --opt -O1
-        shell: pwsh
-        continue-on-error: true
 
       - name: Upload
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: bin-${{ matrix.python }}-win
+          name: binary-${{ matrix.python }}-win
           path: vault/${{ matrix.python }}.win.exe
-          if-no-files-found: warn
+          if-no-files-found: error
 
   combine:
-    needs: [build-linux-arm64, build-windows]
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -90,12 +82,11 @@ jobs:
           find all-binaries -type f -exec cp {} vault/ \;
           ls -la vault/
 
-      - name: Create tarball
+      - name: Tarball
         run: tar -czf vault.tar.gz vault/
 
-      - name: Upload final vault
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: vault-complete
           path: vault.tar.gz
-          if-no-files-found: error
